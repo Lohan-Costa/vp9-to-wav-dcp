@@ -1,0 +1,196 @@
+<!DOCTYPE html>
+<html lang="pt-BR">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>VP9 para WAV — Acessibilidade para DCP</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com" />
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+  <link href="https://fonts.googleapis.com/css2?family=Fraunces:ital,opsz,wght@0,9..144,400;0,9..144,600;1,9..144,300&family=Inter:wght@400;500;600&display=swap" rel="stylesheet" />
+  <link rel="stylesheet" href="style.css" />
+</head>
+<body>
+
+  <!-- ── Tabs ─────────────────────────────────────────────────────────────── -->
+  <header class="app-header">
+    <div class="brand">
+      <span class="brand-title">VP9 · WAV · DCP</span>
+    </div>
+    <nav class="tabs" role="tablist">
+      <button class="tab active" id="tab-converter" role="tab" aria-selected="true" aria-controls="panel-converter">
+        Converter
+      </button>
+      <button class="tab" id="tab-validator" role="tab" aria-selected="false" aria-controls="panel-validator">
+        Validar
+      </button>
+    </nav>
+  </header>
+
+  <!-- ── Converter panel ───────────────────────────────────────────────────── -->
+  <main id="panel-converter" class="panel" role="tabpanel" aria-labelledby="tab-converter">
+    <!-- State 1: Drop zone -->
+    <section id="state-drop" class="state">
+      <div class="drop-zone" id="drop-zone" tabindex="0" role="button" aria-label="Área de arraste de arquivo de vídeo">
+        <div class="drop-icon">
+          <svg width="48" height="48" viewBox="0 0 48 48" fill="none" aria-hidden="true">
+            <rect x="6" y="10" width="36" height="28" rx="4" stroke="currentColor" stroke-width="2"/>
+            <path d="M19 22l5-5 5 5M24 17v14" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/>
+          </svg>
+        </div>
+        <p class="drop-title">Arraste seu vídeo aqui</p>
+        <p class="drop-sub">mp4, mov, webm, mkv, avi</p>
+        <button class="btn-secondary" id="btn-pick-file">Escolher arquivo</button>
+      </div>
+      <input type="file" id="file-input" accept="video/*,.mp4,.mov,.webm,.mkv,.avi" style="display:none" />
+    </section>
+
+    <!-- State 2: Analysis -->
+    <section id="state-analysis" class="state hidden">
+      <h2 class="section-title">Verificação do vídeo</h2>
+      <div class="attr-list" id="attr-list"></div>
+
+      <!-- Crop confirmation (shown only when needed) -->
+      <div id="crop-confirm" class="crop-box hidden">
+        <p class="crop-label" id="crop-description"></p>
+        <div class="crop-actions">
+          <button class="btn-primary" id="btn-confirm-crop">Adaptar com crop centralizado</button>
+          <button class="btn-ghost" id="btn-cancel-crop">Cancelar</button>
+        </div>
+      </div>
+
+      <div class="analysis-actions" id="analysis-actions">
+        <button class="btn-primary" id="btn-start-convert">Iniciar conversão</button>
+        <button class="btn-ghost" id="btn-pick-another-1">Escolher outro arquivo</button>
+      </div>
+    </section>
+
+    <!-- State 3: Processing -->
+    <section id="state-processing" class="state hidden">
+      <h2 class="section-title">Processando…</h2>
+
+      <div class="progress-group">
+        <div class="progress-label">
+          <span>Codificando VP9</span>
+          <span id="pct-encoding">0%</span>
+        </div>
+        <div class="progress-track">
+          <div class="progress-bar" id="bar-encoding" style="width:0%"></div>
+        </div>
+      </div>
+
+      <div class="progress-group">
+        <div class="progress-label">
+          <span>Empacotando WAV</span>
+          <span id="pct-packaging">0%</span>
+        </div>
+        <div class="progress-track">
+          <div class="progress-bar" id="bar-packaging" style="width:0%"></div>
+        </div>
+      </div>
+
+      <p class="progress-message" id="progress-message"></p>
+      <button class="btn-ghost danger" id="btn-cancel">Cancelar processamento</button>
+
+      <!-- Expandable console -->
+      <details class="console-wrap" id="console-details">
+        <summary>Log técnico</summary>
+        <pre class="console" id="console-output"></pre>
+      </details>
+    </section>
+
+    <!-- State 4: Done -->
+    <section id="state-done" class="state hidden">
+      <div class="done-icon">
+        <svg width="56" height="56" viewBox="0 0 56 56" fill="none" aria-hidden="true">
+          <circle cx="28" cy="28" r="26" stroke="currentColor" stroke-width="2"/>
+          <path d="M18 28l7 7 13-13" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"/>
+        </svg>
+      </div>
+      <h2 class="done-title">Conversão concluída</h2>
+      <p class="done-sub">O arquivo WAV está pronto para ser inserido no canal 15 do DCP.</p>
+      <div class="done-actions">
+        <button class="btn-primary" id="btn-save-wav">Salvar WAV</button>
+        <button class="btn-ghost" id="btn-convert-another">Converter outro vídeo</button>
+      </div>
+    </section>
+
+    <!-- State: Error -->
+    <section id="state-error" class="state hidden">
+      <div class="error-icon" aria-hidden="true">✕</div>
+      <h2 class="error-title" id="error-title">Algo deu errado</h2>
+      <p class="error-msg" id="error-msg"></p>
+      <div class="error-actions">
+        <button class="btn-ghost" id="btn-copy-log">Copiar log técnico</button>
+        <button class="btn-primary" id="btn-retry">Tentar novamente</button>
+      </div>
+    </section>
+  </main>
+
+  <!-- ── Validator panel ───────────────────────────────────────────────────── -->
+  <main id="panel-validator" class="panel hidden" role="tabpanel" aria-labelledby="tab-validator">
+    <p class="validator-subtitle">
+      Esta aba verifica se um WAV está corretamente empacotado conforme a ISDCF Doc 13.
+      O vídeo recuperado é apenas uma prova de integridade.
+    </p>
+
+    <!-- State 1: Drop WAV -->
+    <section id="vstate-drop" class="state">
+      <div class="drop-zone" id="vdrop-zone" tabindex="0" role="button" aria-label="Área de arraste de arquivo WAV">
+        <div class="drop-icon">
+          <svg width="48" height="48" viewBox="0 0 48 48" fill="none" aria-hidden="true">
+            <rect x="6" y="6" width="36" height="36" rx="4" stroke="currentColor" stroke-width="2"/>
+            <path d="M17 24h14M24 17v14" stroke="currentColor" stroke-width="2" stroke-linecap="round"/>
+          </svg>
+        </div>
+        <p class="drop-title">Arraste um arquivo WAV aqui</p>
+        <p class="drop-sub">Gerado por este app ou compatível com ISDCF Doc 13</p>
+        <button class="btn-secondary" id="btn-pick-wav">Escolher arquivo WAV</button>
+      </div>
+      <input type="file" id="wav-input" accept=".wav,audio/wav" style="display:none" />
+    </section>
+
+    <!-- State 2: Validation running -->
+    <section id="vstate-running" class="state hidden">
+      <h2 class="section-title">Validando…</h2>
+      <div class="spinner-wrap"><div class="spinner"></div></div>
+    </section>
+
+    <!-- State 3: Results -->
+    <section id="vstate-results" class="state hidden">
+      <h2 class="section-title">Validação técnica</h2>
+      <div class="check-list" id="check-list"></div>
+
+      <div id="video-player-wrap" class="player-wrap hidden">
+        <p class="video-meta" id="video-meta"></p>
+        <video id="video-player" controls></video>
+      </div>
+
+      <div class="val-actions">
+        <button class="btn-primary hidden" id="btn-save-video">Salvar vídeo recuperado</button>
+        <button class="btn-ghost" id="btn-copy-report">Copiar relatório técnico</button>
+        <button class="btn-ghost" id="btn-validate-another">Validar outro WAV</button>
+      </div>
+    </section>
+
+    <!-- State: Error -->
+    <section id="vstate-error" class="state hidden">
+      <div class="error-icon" aria-hidden="true">✕</div>
+      <h2 class="error-title" id="verror-title">Erro na validação</h2>
+      <p class="error-msg" id="verror-msg"></p>
+      <div class="error-actions">
+        <button class="btn-ghost" id="btn-vcopy-log">Copiar log técnico</button>
+        <button class="btn-ghost" id="btn-validate-another-err">Validar outro WAV</button>
+      </div>
+    </section>
+  </main>
+
+  <!-- ── Footer ────────────────────────────────────────────────────────────── -->
+  <footer class="app-footer">
+    Idealizado por
+    <a href="https://www.linkedin.com/in/lohan-costa/" class="footer-link" id="link-lohan">Lohan Costa, edt.</a>
+    · Desenvolvido por Claude Opus 4.7
+  </footer>
+
+  <script src="main.js" type="module"></script>
+</body>
+</html>

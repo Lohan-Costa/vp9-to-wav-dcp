@@ -208,6 +208,18 @@ async fn get_video_temp_path(
 }
 
 #[tauri::command]
+async fn get_video_bytes(state: tauri::State<'_, AppState>) -> Result<Vec<u8>, String> {
+    let path = {
+        let guard = state.validation.lock().unwrap();
+        guard
+            .as_ref()
+            .map(|a| a.video_path.clone())
+            .ok_or_else(|| "Nenhum vídeo disponível para reproduzir".to_string())?
+    };
+    std::fs::read(&path).map_err(|e| format!("Erro ao ler o vídeo: {}", e))
+}
+
+#[tauri::command]
 async fn save_recovered_video(
     dest_path: String,
     state: tauri::State<'_, AppState>,
@@ -258,6 +270,7 @@ pub fn run() {
             save_wav,
             start_validation,
             get_video_temp_path,
+            get_video_bytes,
             save_recovered_video,
             get_log,
             open_url,

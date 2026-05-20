@@ -1,12 +1,13 @@
 {
   "$schema": "https://schema.tauri.app/config/2",
   "productName": "VP9 para WAV",
-  "version": "0.1.0",
+  "version": "0.2.0",
   "identifier": "com.lohancosta.vp9towavdcp",
   "build": {
     "frontendDist": "../src"
   },
   "app": {
+    "withGlobalTauri": true,
     "windows": [
       {
         "title": "VP9 para WAV — Acessibilidade para DCP",

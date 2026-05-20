@@ -3,8 +3,8 @@
   "version": "0.1.0",
   "description": "Conversor de vídeo VP9 para WAV PCM conforme ISDCF Doc 13",
   "scripts": {
-    "dev": "cargo tauri dev",
-    "build": "cargo tauri build",
+    "dev": "tauri dev",
+    "build": "tauri build",
     "tauri": "tauri"
   },
   "devDependencies": {

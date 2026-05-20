@@ -20,12 +20,15 @@ Este app automatiza todo esse processo de empacotamento — sem exigir que o mas
 
 Acesse a aba **[Releases](../../releases)** do repositório.
 
-### macOS
-1. Baixe o arquivo `.dmg` ou `.app.tar.gz`
-2. Abra normalmente
-3. Se o macOS bloquear com aviso de Gatekeeper:
-   - Vá em **Preferências do Sistema → Segurança e Privacidade**
-   - Clique em **"Abrir mesmo assim"** ao lado do nome do app
+### macOS (Apple Silicon)
+1. Baixe o arquivo `.dmg`, abra-o e arraste o app para a pasta **Applications**
+2. Tente abrir o app — o macOS exibirá **"está danificado e não pode ser aberto"**
+   _(isso ocorre porque o app não possui assinatura Apple Developer — é normal em software gratuito de código aberto)_
+3. Abra o **Terminal** e execute:
+   ```
+   xattr -cr "/Applications/VP9 para WAV.app"
+   ```
+4. Abra o app normalmente — o aviso não aparecerá mais
 
 ### Windows
 1. Baixe o arquivo `.exe`

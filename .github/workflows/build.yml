@@ -83,10 +83,18 @@ jobs:
           releaseBody: |
             ## Download
 
-            - **macOS (Apple Silicon):** baixe o `.dmg` ou `.app.tar.gz` e abra normalmente.
-              Se o macOS bloquear, vá em Preferências > Segurança e clique em "Abrir mesmo assim".
-            - **Windows:** baixe o `.exe` e execute diretamente.
-              Se o SmartScreen alertar, clique em "Mais informações" > "Executar mesmo assim".
+            ### macOS (Apple Silicon)
+            1. Baixe o `.dmg`, abra-o e arraste o app para **Applications**
+            2. O macOS exibirá "está danificado e não pode ser aberto" — isso é normal para apps sem assinatura Apple Developer
+            3. Abra o **Terminal** e execute:
+               ```
+               xattr -cr "/Applications/VP9 para WAV.app"
+               ```
+            4. Abra o app normalmente
+
+            ### Windows
+            - Baixe o `.exe` e execute diretamente
+            - Se o SmartScreen alertar, clique em **"Mais informações" → "Executar mesmo assim"**
           releaseDraft: false
           prerelease: false
           args: ${{ matrix.args }}

@@ -1,6 +1,6 @@
 {
   "name": "vp9-to-wav-dcp",
-  "version": "0.1.0",
+  "version": "0.3.0",
   "description": "Conversor de vídeo VP9 para WAV PCM conforme ISDCF Doc 13",
   "scripts": {
     "dev": "tauri dev",

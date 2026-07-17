@@ -10,28 +10,39 @@ use tauri_plugin_shell::process::CommandEvent;
 
 /// Re-encode input to a VP9 WebM conforming to ISDCF Doc 13.
 /// `vf_filter` is the FFmpeg -vf argument (scale or crop+scale).
+/// `target_kbps` is the video bitrate target in kbit/s; it also drives the VBV
+/// so no single 2-second window can blow past the PCM block budget.
 /// Calls `on_progress(percent)` with 0.0–100.0 as encoding proceeds.
 pub async fn encode_vp9(
     app: &AppHandle,
     input: &Path,
     output: &Path,
     vf_filter: &str,
+    target_kbps: u32,
     duration_secs: f64,
     cancel: &Arc<AtomicBool>,
     on_progress: impl Fn(f64),
 ) -> Result<()> {
+    // Constrained VBR: cap the peak rate and keep the VBV buffer short (~1s) so
+    // that any given 2-second GOP stays close to `target_kbps * 2` bits.
+    let rate = format!("{}k", target_kbps);
+
     let args = [
         "-y",
         "-i", &input.to_string_lossy(),
         "-c:v", "libvpx-vp9",
-        "-b:v", "1000k",
-        "-maxrate", "1000k",
+        "-b:v", &rate,
+        "-maxrate", &rate,
+        "-bufsize", &rate,
         "-vf", vf_filter,
         "-r", "24",
         "-pix_fmt", "yuv420p",
         "-an",
         "-g", "48",
         "-keyint_min", "48",
+        // Force a keyframe exactly every 2s (0s, 2s, 4s…) so the segment muxer
+        // cuts on clean 2-second boundaries — essential for the chunk model.
+        "-force_key_frames", "expr:gte(t,n_forced*2)",
         "-deadline", "good",
         "-cpu-used", "2",
         &output.to_string_lossy(),

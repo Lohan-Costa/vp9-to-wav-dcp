@@ -16,6 +16,18 @@ Este app automatiza todo esse processo de empacotamento — sem exigir que o mas
 
 ---
 
+## Novidades da v0.3.0
+
+**Conversão garantida — o erro "Chunk grande demais" não acontece mais.**
+
+Antes, se um trecho do vídeo tivesse movimento demais, um bloco de 2 segundos podia estourar o limite da especificação e a conversão falhava, mesmo com o vídeo já em VP9 a 1 Mbps. Agora o app **garante** que cada bloco cabe:
+
+- **Você não precisa mais pré-converter o vídeo em outro programa.** Basta jogar o vídeo original (mp4, mov, etc.) direto no app — ele cuida de toda a conversão para VP9.
+- **Codificação com controle rígido de tamanho por bloco** (VBV apertado + keyframes exatos a cada 2 s). Se ainda assim algum trecho ficar grande demais, o app **reduz o bitrate e recodifica sozinho** até tudo caber — sem você precisar fazer nada.
+- **Aproveita o VP9 pronto quando dá:** se o vídeo de entrada já está totalmente conforme (480×640, 24 fps, yuv420p) e passa no teste de tamanho, ele é empacotado **sem recompressão**, preservando a qualidade máxima.
+
+---
+
 ## Download
 
 Acesse a aba **[Releases](../../releases)** do repositório.
@@ -89,7 +101,7 @@ Acesse a aba **[Releases](../../releases)** do repositório.
 |---|---|
 | "O vídeo é muito curto" | O vídeo precisa ter pelo menos 2 segundos |
 | Crop inesperado | O vídeo não estava na proporção 3:4 — revise o enquadramento original |
-| "Chunk grande demais" | O vídeo tem muita complexidade visual para 1 Mbps — reduza o tempo ou a resolução do vídeo de entrada |
+| Conversão não cabe no formato (raro) | O app já reduz o bitrate e recodifica sozinho até caber. Só falha em vídeos com movimento/detalhe extremos — nesse caso, use um fundo mais simples ou menor resolução |
 | Checagem de EBML falhou | O WAV pode ter sido gerado com uma versão incompatível da ferramenta |
 | App bloqueado no macOS/Windows | Siga as instruções da seção Download acima |
 

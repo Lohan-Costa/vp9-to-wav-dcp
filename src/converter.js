@@ -253,8 +253,8 @@ export function initConverter(tauri) {
   function friendlyError(raw) {
     if (raw.includes('Cancelado'))    return 'A operação foi cancelada.';
     if (raw.includes('muito curto'))  return raw;
-    if (raw.includes('grande demais'))
-      return 'Um ou mais chunks VP9 ficaram acima do limite. Tente com um vídeo com bitrate menor.';
+    if (raw.includes('não coube') || raw.includes('grande demais'))
+      return 'Um trecho do vídeo tem movimento ou detalhe demais e não coube no formato, mesmo no bitrate mínimo. Tente um vídeo com fundo mais simples ou em menor resolução.';
     if (raw.includes('permissão') || raw.includes('Permission'))
       return 'Sem permissão para gravar no destino. Tente salvar em outro local.';
     return 'Ocorreu um erro inesperado. Abra o log técnico para mais detalhes.';

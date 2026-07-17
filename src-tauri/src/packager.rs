@@ -1,11 +1,12 @@
 use anyhow::{anyhow, Result};
-use std::path::Path;
+use std::path::{Path, PathBuf};
 use std::sync::Arc;
 use std::sync::atomic::{AtomicBool, Ordering};
 use tauri::AppHandle;
 
 use tauri::Emitter;
 
+use crate::analyzer::{self, AttributeStatus};
 use crate::ffmpeg;
 use crate::wav;
 use crate::ProgressEvent;
@@ -16,9 +17,26 @@ const HEADER_SIZE: usize = 20;
 const MAGIC: u32 = 0xFFFF_FFFF;
 const SEGMENT_ID: [u8; 4] = [0x18, 0x53, 0x80, 0x67];
 
+// Maximum bytes a single 2-second chunk (EBML header + VP9 Segment) may occupy
+// so that `HEADER_SIZE + Le + Lv <= BLOCK_SIZE`. Since a chunk file *is*
+// `EBML header + Segment`, its on-disk size equals `Le + Lv`.
+const MAX_CHUNK_BYTES: u64 = (BLOCK_SIZE - HEADER_SIZE) as u64; // 287_980
+
+// Verify-retry encoding bounds.
+const INITIAL_TARGET_KBPS: u32 = 900; // stays within the ISDCF 1 Mbps ceiling
+const MIN_TARGET_KBPS: u32 = 300;     // floor before we give up
+
 // ── Public API ────────────────────────────────────────────────────────────────
 
 /// Convert a video file to an ISDCF Doc 13-compliant WAV PCM file.
+///
+/// Two paths guarantee that every 2-second chunk fits in a 288,000-byte block:
+///   1. **Reuse** — if the input is already a fully conforming VP9 (480×640,
+///      24fps, yuv420p) and, once segmented, every chunk fits, we package it
+///      as-is with no recompression (maximum quality).
+///   2. **Encode with verify-retry** — otherwise we re-encode to VP9 with a
+///      tight VBV and exact 2s keyframes, segment, and check the largest chunk.
+///      If it overflows, we lower the bitrate and re-encode until it fits.
 pub async fn pack_to_wav(
     input: &Path,
     output: &Path,
@@ -29,71 +47,133 @@ pub async fn pack_to_wav(
     let temp_dir = tempfile::tempdir()?;
     let encoded_webm = temp_dir.path().join("encoded.webm");
     let chunk_dir = temp_dir.path().join("chunks");
-    std::fs::create_dir_all(&chunk_dir)?;
 
-    // ── Stage 1: VP9 encoding ─────────────────────────────────────────────────
-    emit_progress(app, "encoding", 0.0, "Iniciando codificação VP9…");
-
-    // Get video duration from a quick probe
     let duration = probe_duration(app, input).await?;
+    let expected_chunks = (duration / 2.0).ceil() as usize;
 
-    let vf_filter = if crop {
-        // The crop_filter is already computed by analyzer; packager receives crop=true
-        // and uses a default landscape crop. For the exact filter the UI passes it
-        // via the `crop` flag — we build the conservative safe crop here.
-        "crop=ih*3/4:ih,scale=480:640".to_string()
-    } else {
-        "scale=480:640".to_string()
+    let info = analyzer::analyze_video(&input.to_string_lossy(), app).await?;
+
+    // ── Path 1: try to reuse an already-conforming VP9 input ──────────────────
+    if !crop && is_reuse_eligible(&info) {
+        emit_progress(app, "encoding", 100.0, "Vídeo já é VP9 conforme — verificando…");
+        reset_dir(&chunk_dir)?;
+        let chunks = ffmpeg::segment_webm(app, input, &chunk_dir).await?;
+        let max = max_chunk_size(&chunks)?;
+
+        if chunks.len() == expected_chunks && max <= MAX_CHUNK_BYTES {
+            emit_progress(app, "encoding", 100.0, "VP9 de entrada aproveitado sem recompressão.");
+            return assemble_wav(output, &chunks, app, cancel);
+        }
+        // Not usable as-is (misaligned keyframes or an oversized chunk) → encode.
+    }
+
+    // ── Path 2: encode to VP9 with verify-retry ───────────────────────────────
+    let vf_filter = info
+        .crop_filter
+        .clone()
+        .unwrap_or_else(|| "scale=480:640".to_string());
+
+    let mut target_kbps = INITIAL_TARGET_KBPS;
+
+    let chunks = loop {
+        if cancel.load(Ordering::SeqCst) {
+            return Err(anyhow!("Cancelado pelo usuário."));
+        }
+
+        // Stage 1: encoding
+        emit_progress(app, "encoding", 0.0, &format!("Iniciando codificação VP9 ({}k)…", target_kbps));
+        reset_dir(&chunk_dir)?;
+
+        let app_clone = app.clone();
+        let bitrate = target_kbps;
+        ffmpeg::encode_vp9(
+            app,
+            input,
+            &encoded_webm,
+            &vf_filter,
+            target_kbps,
+            duration,
+            cancel,
+            move |pct| {
+                emit_progress(
+                    &app_clone,
+                    "encoding",
+                    pct,
+                    &format!("Codificando ({}k)… {:.0}%", bitrate, pct),
+                );
+            },
+        )
+        .await?;
+
+        if cancel.load(Ordering::SeqCst) {
+            return Err(anyhow!("Cancelado pelo usuário."));
+        }
+
+        // Stage 2: segmentation + budget check
+        emit_progress(app, "packaging", 0.0, "Segmentando em chunks de 2s…");
+        let chunks = ffmpeg::segment_webm(app, &encoded_webm, &chunk_dir).await?;
+        if chunks.is_empty() {
+            return Err(anyhow!("Nenhum chunk de vídeo foi gerado. O vídeo pode ser muito curto."));
+        }
+
+        let max = max_chunk_size(&chunks)?;
+        if max <= MAX_CHUNK_BYTES {
+            break chunks;
+        }
+
+        // Overflow → drop the bitrate ~15% and try again.
+        let next = target_kbps * 85 / 100;
+        if next < MIN_TARGET_KBPS {
+            return Err(anyhow!(
+                "Mesmo reduzindo o bitrate ao mínimo, um trecho de 2s do vídeo não coube \
+                 no bloco PCM (maior chunk: {} bytes, limite: {} bytes). O vídeo tem \
+                 movimento ou detalhe demais. Tente reduzir a resolução ou simplificar o fundo.",
+                max, MAX_CHUNK_BYTES
+            ));
+        }
+
+        emit_progress(
+            app,
+            "packaging",
+            0.0,
+            &format!(
+                "Um chunk excedeu {} bytes (limite {}). Recodificando a {}k…",
+                max, MAX_CHUNK_BYTES, next
+            ),
+        );
+        target_kbps = next;
     };
 
-    let app_clone = app.clone();
-    ffmpeg::encode_vp9(
-        app,
-        input,
-        &encoded_webm,
-        &vf_filter,
-        duration,
-        cancel,
-        move |pct| {
-            emit_progress(&app_clone, "encoding", pct, &format!("Codificando… {:.0}%", pct));
-        },
-    )
-    .await?;
-
-    if cancel.load(Ordering::SeqCst) {
-        return Err(anyhow!("Cancelado pelo usuário."));
-    }
-
-    // ── Stage 2: Segmentation ─────────────────────────────────────────────────
-    emit_progress(app, "packaging", 0.0, "Segmentando em chunks de 2s…");
-    let chunks = ffmpeg::segment_webm(app, &encoded_webm, &chunk_dir).await?;
-    let total = chunks.len();
-
-    if total == 0 {
-        return Err(anyhow!("Nenhum chunk de vídeo foi gerado. O vídeo pode ser muito curto."));
-    }
-
     // ── Stage 3: PCM assembly ─────────────────────────────────────────────────
-    let chunks_ref = &chunks;
-    let app_ref = app;
-    let cancel_ref = cancel;
+    assemble_wav(output, &chunks, app, cancel)
+}
 
+// ── WAV assembly ────────────────────────────────────────────────────────────
+
+/// Build the WAV by streaming one 288,000-byte PCM block per chunk.
+fn assemble_wav(
+    output: &Path,
+    chunks: &[PathBuf],
+    app: &AppHandle,
+    cancel: &Arc<AtomicBool>,
+) -> Result<()> {
+    let total = chunks.len();
     let mut chunk_idx: usize = 0;
 
-    wav::write_wav(output, std::iter::from_fn(move || {
-        if chunk_idx >= chunks_ref.len() {
+    wav::write_wav(output, std::iter::from_fn(|| {
+        if chunk_idx >= chunks.len() {
             return None;
         }
-        if cancel_ref.load(Ordering::SeqCst) {
+        if cancel.load(Ordering::SeqCst) {
             return Some(Err(anyhow!("Cancelado pelo usuário.")));
         }
 
-        let path = &chunks_ref[chunk_idx];
+        let path = &chunks[chunk_idx];
         let result = build_pcm_block(path, chunk_idx);
 
         let pct = (chunk_idx + 1) as f64 / total as f64 * 100.0;
         emit_progress(
-            app_ref,
+            app,
             "packaging",
             pct,
             &format!("Empacotando chunk {}/{}", chunk_idx + 1, total),
@@ -103,6 +183,40 @@ pub async fn pack_to_wav(
         Some(result)
     }))?;
 
+    Ok(())
+}
+
+// ── Reuse eligibility & chunk sizing ────────────────────────────────────────
+
+/// True when the input is already a fully conforming VP9 that we may package
+/// without re-encoding (subject to the per-chunk size test done by the caller).
+fn is_reuse_eligible(info: &analyzer::VideoInfo) -> bool {
+    matches!(info.codec.status, AttributeStatus::Conformant)
+        && matches!(info.resolution.status, AttributeStatus::Conformant)
+        && matches!(info.frame_rate.status, AttributeStatus::Conformant)
+        && matches!(info.pixel_format.status, AttributeStatus::Conformant)
+        && !info.needs_crop
+}
+
+/// Largest chunk file size in bytes.
+fn max_chunk_size(chunks: &[PathBuf]) -> Result<u64> {
+    let mut max = 0u64;
+    for p in chunks {
+        let len = std::fs::metadata(p)?.len();
+        if len > max {
+            max = len;
+        }
+    }
+    Ok(max)
+}
+
+/// Empty and recreate a directory so stale chunk files never leak between
+/// encoding attempts.
+fn reset_dir(dir: &Path) -> Result<()> {
+    if dir.exists() {
+        std::fs::remove_dir_all(dir)?;
+    }
+    std::fs::create_dir_all(dir)?;
     Ok(())
 }
 
